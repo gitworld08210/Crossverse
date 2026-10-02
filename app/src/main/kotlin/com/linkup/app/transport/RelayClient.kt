@@ -2,17 +2,20 @@ package com.linkup.app.transport
 
 import com.linkup.core.protocol.Envelope
 import com.linkup.core.protocol.WireJson
+import com.linkup.core.transport.PairingSubscriptions
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.okhttp.OkHttp
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocketSession
 import io.ktor.websocket.Frame
 import io.ktor.websocket.readText
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlin.coroutines.coroutineContext
 
@@ -37,15 +40,24 @@ data class Hello(val deviceId: String, val pairingId: String)
  * The relay authenticates each socket to a single ([deviceId], [pairingId]), so
  * a device in MORE THAN ONE pairing (phone↔tablet and phone↔laptop as distinct
  * pairings) needs one socket per pairing. This client therefore multiplexes: it
- * maintains one auto-reconnecting [connect] loop per pairing id and sends an
+ * maintains one auto-reconnecting connect loop per pairing id and sends an
  * envelope over the socket matching its [Envelope.pairingId]. Each loop uses
  * capped exponential backoff so a device that roams or sleeps re-establishes the
  * connection and (thanks to the relay's offline queue) catches up.
+ *
+ * The subscribed pairing set is DYNAMIC. The ids passed in are only the ones
+ * known at construction (zero on a fresh install); [addPairing] launches a new
+ * connect loop at runtime so a pairing created or accepted AFTER [connect] --
+ * including the user's very first pairing -- gets its own relay socket WITHOUT a
+ * process restart. That is exactly the far-away/no-LAN case where the relay is
+ * the only path, so the socket must come up immediately. [addPairing] is
+ * idempotent (via [PairingSubscriptions]): re-adding an already-subscribed
+ * pairing is a no-op and never spawns a duplicate loop.
  */
 class RelayClient(
     private val relayUrl: String,
     private val deviceId: String,
-    private val pairingIds: List<String>,
+    pairingIds: List<String>,
     private val client: HttpClient = defaultClient()
 ) {
 
@@ -70,19 +82,55 @@ class RelayClient(
     private val sessions =
         java.util.concurrent.ConcurrentHashMap<String, io.ktor.client.plugins.websocket.DefaultClientWebSocketSession>()
 
+    // Dynamic set of pairing ids we hold (or are establishing) a socket for.
+    // Starts with the ids known at construction and grows via [addPairing].
+    private val subscriptions = PairingSubscriptions(pairingIds)
+
+    // The scope [connect] runs in, captured so [addPairing] can launch a new
+    // per-pairing connect loop into the SAME lifetime. Null until [connect].
+    @Volatile
+    private var connectScope: CoroutineScope? = null
+
     /**
-     * Connect a socket for every pairing and keep them all alive, reconnecting
-     * with backoff until the calling coroutine is cancelled. Received envelopes
-     * from any pairing are emitted on [incoming]. Suspends for the lifetime of
-     * the connection loops, so launch it in the service scope.
+     * Connect a socket for every currently-subscribed pairing and keep them all
+     * alive, reconnecting with backoff until the calling coroutine is cancelled.
+     * Received envelopes from any pairing are emitted on [incoming]. Suspends for
+     * the lifetime of the connection loops, so launch it in the service scope.
+     *
+     * After this returns control to its own body, [addPairing] can inject
+     * additional loops into the same scope at runtime.
      */
     suspend fun connect() {
-        if (pairingIds.isEmpty()) return
         kotlinx.coroutines.coroutineScope {
-            for (pairingId in pairingIds.distinct()) {
+            connectScope = this
+            for (pairingId in subscriptions.snapshot()) {
                 launch { connectPairing(pairingId) }
             }
+            // Keep the scope alive even if we started with no pairings (fresh
+            // install) so a later [addPairing] has a live scope to launch into.
+            launch { kotlinx.coroutines.awaitCancellation() }
         }
+    }
+
+    /**
+     * Subscribe to [pairingId] at runtime: if it is not already subscribed,
+     * launch a new auto-reconnecting connect loop for it into the [connect]
+     * scope. Idempotent -- re-adding an existing pairing does nothing and never
+     * spawns a duplicate loop. Call from the pairing-completion paths
+     * (`createPairing` / `acceptPairing` / `recordPeer`) so a device that pairs
+     * while running immediately gets a relay socket for the new pairing without
+     * a restart.
+     *
+     * Returns true if a new loop was launched, false if the pairing was already
+     * subscribed or [connect] has not been called yet (in which case the pairing
+     * is still recorded and will be connected when [connect] runs).
+     */
+    fun addPairing(pairingId: String): Boolean {
+        val isNew = subscriptions.add(pairingId)
+        if (!isNew) return false
+        val scope = connectScope ?: return false
+        scope.launch { connectPairing(pairingId) }
+        return true
     }
 
     private suspend fun connectPairing(pairingId: String) {

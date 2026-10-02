@@ -10,8 +10,8 @@ transport that keeps syncing when the phone is far away.
 
 - [x] **Shared `:core` protocol.** `Envelope` + `WireJson` wire format and
   length-prefixed `Framing` for the LAN socket. Unit-tested on the JVM.
-- [x] **Pairing.** QR and 8-character short code producing a shared 32-byte
-  secret (`Pairing`, `PairingPayload`).
+- [x] **Pairing.** QR (or pasted payload JSON) producing a shared 32-byte
+  secret (`Pairing`, `PairingPayload`). Short-code resolution is a later phase.
 - [x] **End-to-end crypto.** HKDF-SHA256 per-link key derivation and
   AES-256-GCM seal/open (`E2E`, `EnvelopeCodec`). No third-party crypto.
 - [x] **LAN transport (near path).** NSD/mDNS `_linkup._tcp` discovery + direct

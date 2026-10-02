@@ -22,11 +22,6 @@ class PairingTest {
     }
 
     @Test
-    fun `short code is 8 characters`() {
-        assertEquals(8, Pairing.generateShortCode().length)
-    }
-
-    @Test
     fun `pairing payload round-trips through encode and parse`() {
         val secret = Pairing.generateSecret()
         val payload = Pairing.createPairingPayload("pair-1", initiator, secret)
@@ -49,9 +44,9 @@ class PairingTest {
     }
 
     @Test
-    fun `generated short codes vary`() {
-        val codes = (1..20).map { Pairing.generateShortCode() }.toSet()
-        // Astronomically unlikely to collide across 20 draws of 32^8 space.
-        assertTrue(codes.size > 1)
+    fun `generated secrets vary`() {
+        val secrets = (1..20).map { Pairing.generateSecret().toList() }.toSet()
+        // Astronomically unlikely to collide across 20 draws of a 32-byte space.
+        assertTrue(secrets.size > 1)
     }
 }

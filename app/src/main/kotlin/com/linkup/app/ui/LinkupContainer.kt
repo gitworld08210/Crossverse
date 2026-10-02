@@ -69,6 +69,9 @@ object LinkupContainer {
                 val lan = LanTransport(appContext!!, pm.deviceId, scope)
                 TransportRouter(lan, relay, scope).also {
                     it.start()
+                    // Open a far-path socket as soon as the UI creates/accepts a
+                    // pairing, so remote (no-LAN) sync works without a restart.
+                    pm.onPairingSubscribed = it::subscribePairing
                     routerRef = it
                 }
             }

@@ -23,11 +23,11 @@ import javax.crypto.SecretKey
  * secret via :core [E2E.deriveLinkKey], so a key leak can't happen from storage
  * and the derivation logic stays in the shared, unit-tested core.
  *
- * Two ways to pair, both from :core:
- *  - QR: [buildPairingPayloadJson] produces the full [PairingPayload] JSON to
- *    render as a QR; the scanner passes the decoded text to [acceptPairing].
- *  - Short code: a human-typable handle that indexes a pending pairing; the
- *    initiator/relay hands the full payload to the device presenting the code.
+ * Pairing in Phase 1 is QR-based: [buildPairingPayloadJson] produces the full
+ * [PairingPayload] JSON to render as a QR, and the scanner passes the decoded
+ * text (or the same payload pasted manually) to [acceptPairing]. There is no
+ * short-code resolution in Phase 1 (no relay-side pending-pairing index exists),
+ * so the cosmetic short-code API has been removed.
  */
 class PairingManager(context: Context) {
 
@@ -43,6 +43,18 @@ class PairingManager(context: Context) {
             EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
         )
     }
+
+    /**
+     * Invoked with a pairing id whenever a pairing is created, accepted, or a
+     * new peer is recorded. The transport owner (SyncService / LinkupContainer)
+     * sets this to [com.linkup.app.transport.TransportRouter.subscribePairing]
+     * so the relay opens a far-path socket for the new pairing immediately,
+     * without a process restart. Idempotent on the router side. Null until the
+     * router is wired, and safe to leave null (pairings are still persisted and
+     * picked up on the next startup snapshot).
+     */
+    @Volatile
+    var onPairingSubscribed: ((String) -> Unit)? = null
 
     /** Stable, per-install device id used as [Envelope.fromDeviceId]. */
     val deviceId: String
@@ -60,6 +72,9 @@ class PairingManager(context: Context) {
         val pairingId = UUID.randomUUID().toString()
         val secret = Pairing.generateSecret()
         persistSecret(pairingId, secret)
+        // Open the far-path relay socket for this pairing right away so a device
+        // that pairs while running can sync off-LAN without a restart.
+        onPairingSubscribed?.invoke(pairingId)
         return Pairing.createPairingPayload(pairingId, self, secret)
     }
 
@@ -67,12 +82,9 @@ class PairingManager(context: Context) {
     fun buildPairingPayloadJson(payload: PairingPayload): String =
         Pairing.encodePairingPayload(payload)
 
-    /** Generate an 8-char human-typable short code (delegates to :core). */
-    fun generateShortCode(): String = Pairing.generateShortCode()
-
     /**
      * Accept a scanned/typed pairing: parse the [payloadJson] (QR text or the
-     * payload the short code resolved to), persist the secret encrypted, derive
+     * full payload pasted manually), persist the secret encrypted, derive
      * nothing yet, and record the peer as a [PairedDevice].
      */
     fun acceptPairing(payloadJson: String): PairedDevice {
@@ -80,6 +92,9 @@ class PairingManager(context: Context) {
         persistSecret(payload.pairingId, payload.secret())
         val paired = PairedDevice(pairingId = payload.pairingId, device = payload.initiator)
         persistPairedDevice(paired)
+        // First pairing on a fresh install reaches the far path here: open its
+        // relay socket now so remote (no-LAN) sync works without a restart.
+        onPairingSubscribed?.invoke(payload.pairingId)
         return paired
     }
 
@@ -104,6 +119,9 @@ class PairingManager(context: Context) {
         val already = pairedDevices().any { it.pairingId == pairingId && it.device.id == device.id }
         if (already) return
         persistPairedDevice(PairedDevice(pairingId = pairingId, device = device))
+        // A brand-new pairing/peer learned at runtime also needs its far-path
+        // socket. Idempotent on the router side if one already exists.
+        onPairingSubscribed?.invoke(pairingId)
     }
 
     /** The local device's public [DeviceInfo] for pairing handshakes. */

@@ -73,6 +73,10 @@ class SyncService : Service() {
         )
         val lan = LanTransport(applicationContext, pairing.deviceId, scope)
         router = TransportRouter(lan, relay, scope)
+        // Wire runtime pairing-completion to the relay so a pairing created or
+        // accepted after startup (incl. the first pairing on a fresh install)
+        // gets its far-path socket immediately, without a process restart.
+        pairing.onPairingSubscribed = router::subscribePairing
         clipboardSync = ClipboardSync(applicationContext, pairing, router)
         fileShare = FileShare(applicationContext, pairing, router)
         screenshotCapture = ScreenshotCapture(applicationContext, fileShare)

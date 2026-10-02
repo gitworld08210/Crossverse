@@ -96,7 +96,8 @@ It listens on port `8080` and exposes `GET /health` and `WS /ws`. See
    `buildConfigField` in [`app/build.gradle.kts`](app/build.gradle.kts) to your
    `wss://<host>/ws`.
 4. Run `:app` from Android Studio onto 2+ Android devices (API 26+), pair them
-   via QR or short code, and try clipboard, screenshot, and file sharing.
+   via QR scan (or by pasting the payload JSON), and try clipboard, screenshot,
+   and file sharing.
 
 The full on-device and off-LAN test procedure is in
 [`docs/VERIFICATION.md`](docs/VERIFICATION.md).

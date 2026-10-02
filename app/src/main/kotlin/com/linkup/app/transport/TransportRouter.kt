@@ -86,6 +86,17 @@ class TransportRouter(
         }
     }
 
+    /**
+     * Subscribe the relay to a pairing created or accepted at runtime so its
+     * far-path socket comes up immediately, without waiting for a process
+     * restart. Idempotent. Call from the pairing-completion paths so a device
+     * that pairs while running can sync off-LAN right away (the "phone is far
+     * away" case, where there is no LAN peer to mask a missing relay socket).
+     */
+    fun subscribePairing(pairingId: String) {
+        relay.addPairing(pairingId)
+    }
+
     /** Observe incoming envelopes as a [Flow]. */
     fun incomingFlow(): Flow<Envelope> = incoming
 

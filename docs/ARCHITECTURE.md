@@ -31,10 +31,9 @@ PairingManager.createPairing(self)
   payload   = { pairingId, initiator DeviceInfo, secretB64 }
 
    present payload as:
-     (a) QR code  = Pairing.encodePairingPayload(payload)   // carries full secret
-     (b) 8-char short code  = Pairing.generateShortCode()   // handle only, NOT the secret
+     QR code  = Pairing.encodePairingPayload(payload)   // carries full secret
                                    |
-          scan QR / present code   v
+          scan QR (or paste the payload JSON)   v
                               PairingManager.acceptPairing(payloadJson)
                                 parse payload, persist same secret
                                 record peer as PairedDevice
@@ -48,11 +47,12 @@ Per-link key (derived on demand, never stored):
 Trust model note: the QR code embeds the full secret because scanning it needs
 physical proximity, so it is safe. After scanning, the peer sends a sealed
 `PAIRING_HELLO` back to the initiator so BOTH sides record each other and the
-pairing is bidirectional. A human-typable short code that resolves to a pending
-pairing is planned (`Pairing.generateShortCode()` exists in `:core`) but is NOT
-wired in Phase 1 — pair by QR scan or by pasting the full `PairingPayload` JSON.
-The pairing secret is long-lived and static in Phase 1 (no rotation / forward
-secrecy); see `SECURITY.md` for that limitation.
+pairing is bidirectional. Phase 1 pairs by QR scan or by pasting the full
+`PairingPayload` JSON; there is no short-code resolution (no relay-side
+pending-pairing index exists yet), so `:core` ships no short-code generator. A
+human-typable short code that resolves to a relay-held pending pairing is a
+later-phase item. The pairing secret is long-lived and static in Phase 1 (no
+rotation / forward secrecy); see `SECURITY.md` for that limitation.
 
 ## Wire protocol: Envelope + framing
 
