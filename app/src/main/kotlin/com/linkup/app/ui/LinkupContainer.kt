@@ -3,6 +3,7 @@ package com.linkup.app.ui
 import android.content.Context
 import com.linkup.app.BuildConfig
 import com.linkup.app.clipboard.ClipboardSync
+import com.linkup.app.pairing.PairingHandshake
 import com.linkup.app.pairing.PairingManager
 import com.linkup.app.share.FileShare
 import com.linkup.app.transport.LanTransport
@@ -36,6 +37,9 @@ object LinkupContainer {
     @Volatile
     private var fileShareRef: FileShare? = null
 
+    @Volatile
+    private var handshakeRef: PairingHandshake? = null
+
     fun init(context: Context) {
         if (appContext == null) appContext = context.applicationContext
     }
@@ -59,7 +63,8 @@ object LinkupContainer {
                 val relay = RelayClient(
                     relayUrl = BuildConfig.RELAY_URL,
                     deviceId = pm.deviceId,
-                    pairingId = pm.pairedDevices().firstOrNull()?.pairingId ?: pm.deviceId
+                    pairingIds = pm.pairedDevices().map { it.pairingId }.distinct()
+                        .ifEmpty { listOf(pm.deviceId) }
                 )
                 val lan = LanTransport(appContext!!, pm.deviceId, scope)
                 TransportRouter(lan, relay, scope).also {
@@ -83,6 +88,14 @@ object LinkupContainer {
         return fileShareRef ?: synchronized(this) {
             fileShareRef ?: FileShare(appContext!!, pairing(appContext!!), router(appContext!!))
                 .also { fileShareRef = it }
+        }
+    }
+
+    fun pairingHandshake(context: Context): PairingHandshake {
+        init(context)
+        return handshakeRef ?: synchronized(this) {
+            handshakeRef ?: PairingHandshake(pairing(appContext!!), router(appContext!!))
+                .also { handshakeRef = it }
         }
     }
 }

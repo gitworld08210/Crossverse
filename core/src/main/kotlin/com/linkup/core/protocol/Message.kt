@@ -47,6 +47,24 @@ data class Envelope(
 }
 
 /**
+ * Pairing handshake payload. After a device SCANS a QR and accepts the pairing,
+ * it learns the initiator's [com.linkup.core.model.DeviceInfo] from the QR but
+ * the initiator does NOT yet know the scanner. The scanner seals this payload
+ * (its own [com.linkup.core.model.DeviceInfo]) under the shared per-link key and
+ * sends it as a [TransferKind.PAIRING_HELLO] envelope; the initiator opens it
+ * and records the scanner as a peer, making the pairing bidirectional.
+ */
+@Serializable
+data class PairingHelloPayload(val device: com.linkup.core.model.DeviceInfo) {
+    fun toJson(): String = WireJson.json.encodeToString(serializer(), this)
+
+    companion object {
+        fun fromJson(text: String): PairingHelloPayload =
+            WireJson.json.decodeFromString(serializer(), text)
+    }
+}
+
+/**
  * Universal Clipboard payload: the text copied on one device, to appear on the
  * others. Carried inside a sealed [Envelope] of kind
  * [TransferKind.CLIPBOARD_TEXT].
@@ -65,9 +83,15 @@ data class ClipboardPayload(val text: String) {
  * Metadata describing a file/photo/screenshot transfer, sent before the chunks
  * so the receiver can allocate and verify. [sha256] is a hex digest of the full
  * content used for integrity checking after reassembly.
+ *
+ * [transferId] uniquely identifies this transfer within its pairing so the
+ * receiver can keep two concurrent transfers (e.g. two photos, or a screenshot
+ * landing mid file-send) apart instead of interleaving their chunks. It is
+ * echoed on every [FileChunkPayload] of the same transfer.
  */
 @Serializable
 data class FileMetaPayload(
+    val transferId: String,
     val name: String,
     val mimeType: String,
     val sizeBytes: Long,
@@ -82,11 +106,15 @@ data class FileMetaPayload(
 }
 
 /**
- * One chunk of a file/photo/screenshot transfer. [index] is 0-based and runs to
+ * One chunk of a file/photo/screenshot transfer. [transferId] matches the
+ * [FileMetaPayload.transferId] this chunk belongs to, so reassembly is keyed on
+ * the transfer rather than guessed from "the first in-flight transfer for this
+ * pairing" (which corrupts concurrent transfers). [index] is 0-based and runs to
  * [totalChunks] - 1; [dataB64] is a base64 slice of the content.
  */
 @Serializable
 data class FileChunkPayload(
+    val transferId: String,
     val index: Int,
     val totalChunks: Int,
     val dataB64: String

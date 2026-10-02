@@ -45,9 +45,16 @@ class ScreenshotCapture(
      * dialog, encode it to PNG, and send it to all paired devices as a
      * SCREENSHOT transfer. Returns the PNG byte size, or null on failure.
      *
-     * NOTE: on API 29+ MediaProjection must be started from a running foreground
-     * service of type mediaProjection; [com.linkup.app.service.SyncService]
-     * provides a foreground context for this.
+     * IMPORTANT: on API 29+ (hard-enforced on API 34) MediaProjection can only
+     * be acquired while a foreground service of type `mediaProjection` is
+     * running with the FOREGROUND_SERVICE_MEDIA_PROJECTION permission, otherwise
+     * [MediaProjectionManager.getMediaProjection] /
+     * [android.hardware.display.VirtualDisplay] throws a SecurityException. For
+     * that reason this is NOT called directly from the UI; it is driven by
+     * [com.linkup.app.service.SyncService.captureScreenshot], which elevates the
+     * running foreground service to the mediaProjection type around the call and
+     * restores it afterwards. The UI only launches [newPermissionIntent] and
+     * hands the (resultCode, data) to the service.
      */
     suspend fun capture(resultCode: Int, data: Intent): Int? {
         val projection = projectionManager.getMediaProjection(resultCode, data) ?: return null

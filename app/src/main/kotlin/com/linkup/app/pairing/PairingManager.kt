@@ -93,6 +93,23 @@ class PairingManager(context: Context) {
         return E2E.deriveLinkKey(secret, context)
     }
 
+    /**
+     * Record a peer we learned about AFTER the initial pairing exchange, e.g.
+     * the initiator receiving the scanner's [TransferKind.PAIRING_HELLO]. The
+     * secret for [pairingId] is already stored (the initiator persisted it in
+     * [createPairing]); here we only add the peer so the pairing becomes
+     * bidirectional. No-op if we already know this device for this pairing.
+     */
+    fun recordPeer(pairingId: String, device: DeviceInfo) {
+        val already = pairedDevices().any { it.pairingId == pairingId && it.device.id == device.id }
+        if (already) return
+        persistPairedDevice(PairedDevice(pairingId = pairingId, device = device))
+    }
+
+    /** The local device's public [DeviceInfo] for pairing handshakes. */
+    fun selfDeviceInfo(displayName: String, deviceType: com.linkup.core.model.DeviceType): DeviceInfo =
+        DeviceInfo(id = deviceId, displayName = displayName, deviceType = deviceType)
+
     /** All devices this device has paired with. */
     fun pairedDevices(): List<PairedDevice> {
         val raw = prefs.getStringSet(KEY_PAIRED, emptySet()) ?: emptySet()

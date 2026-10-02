@@ -12,6 +12,11 @@
          remote phone stays reachable even in the background. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- Screenshot capture uses MediaProjection, which on API 29+ (hard-enforced
+         on API 34) must run under a mediaProjection-typed foreground service with
+         this matching permission; without it getMediaProjection/
+         createVirtualDisplay throws a SecurityException. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <!-- Notifications for received clipboard / files (runtime-requested on 13+). -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -43,11 +48,15 @@
 
         <!-- Foreground sync service: holds the TransportRouter (LAN + relay)
              alive and dispatches incoming envelopes to the clipboard/file
-             handlers. dataSync type matches FOREGROUND_SERVICE_DATA_SYNC. -->
+             handlers. It declares BOTH foreground-service types it uses:
+             dataSync for the always-on transport, and mediaProjection so that
+             screenshot capture can run under a projection-typed foreground
+             service as API 29+/34 require. The service elevates to the
+             mediaProjection type only while a capture is in flight. -->
         <service
             android:name=".service.SyncService"
             android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:foregroundServiceType="dataSync|mediaProjection" />
     </application>
 
 </manifest>

@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
@@ -32,6 +33,7 @@ import com.linkup.app.pairing.QrCodec
 import com.linkup.core.model.DeviceInfo
 import com.linkup.core.model.DeviceType
 import com.linkup.core.model.PairedDevice
+import kotlinx.coroutines.launch
 
 /**
  * Devices screen: lists paired devices and offers two ways to add one, both
@@ -39,28 +41,41 @@ import com.linkup.core.model.PairedDevice
  *  - "Show QR" renders this device's pairing payload (secret embedded; safe
  *    because scanning needs physical proximity) for the peer to scan.
  *  - "Scan QR" opens the camera scanner; the decoded text is handed to
- *    PairingManager.acceptPairing which derives nothing yet but stores the
- *    secret encrypted and records the peer.
- *  - A short-code field accepts a typed payload/handle for the same accept path.
+ *    PairingManager.acceptPairing which stores the secret encrypted and records
+ *    the initiator, then sends a sealed PAIRING_HELLO back so the initiator
+ *    records this device too (bidirectional pairing).
+ *  - A "paste pairing payload" field accepts the full payload JSON for the same
+ *    accept path (useful when a camera scan is not possible). Phase 1 has no
+ *    relay-side pending-pairing index, so there is no short-code resolution.
  */
 @Composable
 fun DevicesScreen() {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val pairing = remember { LinkupContainer.pairing(context) }
+    val handshake = remember { LinkupContainer.pairingHandshake(context) }
 
     var devices by remember { mutableStateOf(pairing.pairedDevices()) }
     var qrContent by remember { mutableStateOf<String?>(null) }
     var shortCode by remember { mutableStateOf("") }
     var status by remember { mutableStateOf<String?>(null) }
 
+    fun self(): DeviceInfo = pairing.selfDeviceInfo(
+        displayName = android.os.Build.MODEL ?: "This device",
+        deviceType = DeviceType.PHONE
+    )
+
     val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
         val contents = result.contents
         if (contents != null) {
-            status = runCatching {
+            runCatching {
                 val paired = pairing.acceptPairing(contents)
                 devices = pairing.pairedDevices()
-                "Paired with ${paired.device.displayName}"
-            }.getOrElse { "Scan failed: ${it.message}" }
+                // Make the pairing bidirectional: tell the initiator who we are
+                // so it records us as a peer and can send back to us.
+                scope.launch { handshake.announceToInitiator(self(), paired) }
+                status = "Paired with ${paired.device.displayName}"
+            }.onFailure { status = "Scan failed: ${it.message}" }
         }
     }
 
@@ -82,14 +97,12 @@ fun DevicesScreen() {
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(onClick = {
-                val self = DeviceInfo(
-                    id = pairing.deviceId,
-                    displayName = android.os.Build.MODEL ?: "This device",
-                    deviceType = DeviceType.PHONE
-                )
-                val payload = pairing.createPairing(self)
+                val payload = pairing.createPairing(self())
                 qrContent = pairing.buildPairingPayloadJson(payload)
-                status = "Short code: ${pairing.generateShortCode()}"
+                // Phase 1 has no relay-side pending-pairing index, so there is no
+                // short code to resolve. Pair by scanning the QR, or by pasting
+                // the full payload JSON below.
+                status = "Scan this QR on the other device to pair"
             }) { Text("Show QR") }
 
             OutlinedButton(onClick = {
@@ -107,16 +120,17 @@ fun DevicesScreen() {
         OutlinedTextField(
             value = shortCode,
             onValueChange = { shortCode = it },
-            label = { Text("Enter pairing payload / short code") },
+            label = { Text("Paste pairing payload") },
             modifier = Modifier.fillMaxWidth()
         )
         Button(
             onClick = {
-                status = runCatching {
+                runCatching {
                     val paired = pairing.acceptPairing(shortCode)
                     devices = pairing.pairedDevices()
-                    "Paired with ${paired.device.displayName}"
-                }.getOrElse { "Could not pair: ${it.message}" }
+                    scope.launch { handshake.announceToInitiator(self(), paired) }
+                    status = "Paired with ${paired.device.displayName}"
+                }.onFailure { status = "Could not pair: ${it.message}" }
             },
             modifier = Modifier.padding(top = 8.dp)
         ) { Text("Pair") }

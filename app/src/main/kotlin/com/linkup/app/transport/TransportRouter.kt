@@ -35,16 +35,35 @@ class TransportRouter(
     /** Unified stream of received envelopes from WHICHEVER transport delivered. */
     val incoming: SharedFlow<Envelope> = _incoming.asSharedFlow()
 
+    // Bounded set of recently-seen envelope identities for at-least-once
+    // dedup. [send]'s LAN↔relay fallback can deliver the SAME sealed envelope
+    // twice (the LAN write landed but reported failure, then we also relayed
+    // it), and clipboard apply / notifications are not naturally idempotent.
+    // An envelope is sealed exactly once per send, so its (from, pairing, nonce)
+    // triple uniquely identifies that delivery; a legitimate re-send uses a
+    // fresh nonce and is NOT deduped.
+    private val seen = object : LinkedHashMap<String, Boolean>(256, 0.75f, false) {
+        override fun removeEldestEntry(eldest: Map.Entry<String, Boolean>): Boolean =
+            size > DEDUP_CAPACITY
+    }
+    private val seenLock = Any()
+
+    private fun firstSight(envelope: Envelope): Boolean {
+        val id = "${envelope.fromDeviceId}|${envelope.pairingId}|${envelope.nonceB64}"
+        return synchronized(seenLock) { seen.put(id, true) == null }
+    }
+
     /**
      * Start both transports and fan their incoming envelopes into the single
-     * [incoming] flow. Call once from [com.linkup.app.service.SyncService].
+     * [incoming] flow, dropping duplicate deliveries. Call once from
+     * [com.linkup.app.service.SyncService].
      */
     fun start() {
         lan.start()
         scope.launch { relay.connect() }
         scope.launch {
             merge(lan.incoming, relay.incoming).collect { envelope ->
-                _incoming.emit(envelope)
+                if (firstSight(envelope)) _incoming.emit(envelope)
             }
         }
     }
@@ -74,5 +93,10 @@ class TransportRouter(
     fun stop() {
         lan.stop()
         relay.close()
+    }
+
+    private companion object {
+        /** Max recently-seen envelope identities retained for dedup. */
+        private const val DEDUP_CAPACITY = 512
     }
 }

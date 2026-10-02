@@ -34,16 +34,28 @@ data class Hello(val deviceId: String, val pairingId: String)
  * only ever sees opaque ciphertext (it routes by [Envelope.pairingId] /
  * [Envelope.fromDeviceId]); nothing is decryptable here or there.
  *
- * [connect] runs an auto-reconnect loop with capped exponential backoff so a
- * device that roams between networks or sleeps re-establishes the connection and
- * (thanks to the relay's offline queue) catches up on anything it missed.
+ * The relay authenticates each socket to a single ([deviceId], [pairingId]), so
+ * a device in MORE THAN ONE pairing (phone↔tablet and phone↔laptop as distinct
+ * pairings) needs one socket per pairing. This client therefore multiplexes: it
+ * maintains one auto-reconnecting [connect] loop per pairing id and sends an
+ * envelope over the socket matching its [Envelope.pairingId]. Each loop uses
+ * capped exponential backoff so a device that roams or sleeps re-establishes the
+ * connection and (thanks to the relay's offline queue) catches up.
  */
 class RelayClient(
     private val relayUrl: String,
     private val deviceId: String,
-    private val pairingId: String,
+    private val pairingIds: List<String>,
     private val client: HttpClient = defaultClient()
 ) {
+
+    /** Convenience single-pairing constructor (kept for simple callers/tests). */
+    constructor(
+        relayUrl: String,
+        deviceId: String,
+        pairingId: String,
+        client: HttpClient = defaultClient()
+    ) : this(relayUrl, deviceId, listOf(pairingId), client)
 
     private val _incoming = MutableSharedFlow<Envelope>(
         replay = 0,
@@ -53,22 +65,32 @@ class RelayClient(
     /** Envelopes received from the relay (already sealed; open via :core). */
     val incoming: SharedFlow<Envelope> = _incoming.asSharedFlow()
 
-    // The live session, used by [send]. Null while disconnected / reconnecting.
-    @Volatile
-    private var session: io.ktor.client.plugins.websocket.DefaultClientWebSocketSession? = null
+    // One live session per pairing id, used by [send]. A value is absent while
+    // that pairing's socket is disconnected / reconnecting.
+    private val sessions =
+        java.util.concurrent.ConcurrentHashMap<String, io.ktor.client.plugins.websocket.DefaultClientWebSocketSession>()
 
     /**
-     * Connect to the relay and keep the connection alive, reconnecting with
-     * backoff until the calling coroutine is cancelled. Received envelopes are
-     * emitted on [incoming]. This function suspends for the lifetime of the
-     * connection loop, so launch it in the service scope.
+     * Connect a socket for every pairing and keep them all alive, reconnecting
+     * with backoff until the calling coroutine is cancelled. Received envelopes
+     * from any pairing are emitted on [incoming]. Suspends for the lifetime of
+     * the connection loops, so launch it in the service scope.
      */
     suspend fun connect() {
+        if (pairingIds.isEmpty()) return
+        kotlinx.coroutines.coroutineScope {
+            for (pairingId in pairingIds.distinct()) {
+                launch { connectPairing(pairingId) }
+            }
+        }
+    }
+
+    private suspend fun connectPairing(pairingId: String) {
         var backoffMs = INITIAL_BACKOFF_MS
         while (coroutineContext.isActive) {
             try {
                 val ws = client.webSocketSession(urlString = relayUrl)
-                session = ws
+                sessions[pairingId] = ws
                 // Handshake: send Hello first, exactly as the relay expects.
                 ws.send(Frame.Text(WireJson.json.encodeToString(Hello.serializer(), Hello(deviceId, pairingId))))
                 backoffMs = INITIAL_BACKOFF_MS // connected cleanly: reset backoff.
@@ -85,7 +107,7 @@ class RelayClient(
             } catch (_: Exception) {
                 // Fall through to backoff + retry below.
             } finally {
-                session = null
+                sessions.remove(pairingId)
             }
 
             if (!coroutineContext.isActive) break
@@ -95,12 +117,13 @@ class RelayClient(
     }
 
     /**
-     * Send a sealed [envelope] to the relay. Returns true if a live session
-     * accepted it, false if currently disconnected (the caller may retry or rely
-     * on the LAN path / relay offline queue).
+     * Send a sealed [envelope] to the relay over the socket for its
+     * [Envelope.pairingId]. Returns true if a live session for that pairing
+     * accepted it, false if that pairing is currently disconnected (the caller
+     * may retry or rely on the LAN path / relay offline queue).
      */
     suspend fun send(envelope: Envelope): Boolean {
-        val ws = session ?: return false
+        val ws = sessions[envelope.pairingId] ?: return false
         return try {
             ws.send(Frame.Text(envelope.toJson()))
             true

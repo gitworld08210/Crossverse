@@ -24,7 +24,17 @@ enum class TransferKind {
     CLIPBOARD_TEXT,
     SCREENSHOT,
     FILE,
-    PHOTO
+    PHOTO,
+
+    /**
+     * A pairing handshake: the device that SCANNED a QR (and therefore learned
+     * the initiator's [DeviceInfo]) sends its own [DeviceInfo] back so the
+     * initiator can record it as a [PairedDevice]. Without this the initiator
+     * has an empty peer list and can send nothing, so Phase 1's bidirectional
+     * flows (copy on A, see on B) only worked one way. Sealed under the same
+     * per-link key as everything else; the relay still never decrypts it.
+     */
+    PAIRING_HELLO
 }
 
 /**

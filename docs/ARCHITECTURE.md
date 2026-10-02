@@ -46,9 +46,13 @@ Per-link key (derived on demand, never stored):
 ```
 
 Trust model note: the QR code embeds the full secret because scanning it needs
-physical proximity, so it is safe. The 8-character short code does NOT carry the
-secret; it is a human-typable handle that indexes a pending pairing, which then
-hands the full `PairingPayload` to the device that presents the code.
+physical proximity, so it is safe. After scanning, the peer sends a sealed
+`PAIRING_HELLO` back to the initiator so BOTH sides record each other and the
+pairing is bidirectional. A human-typable short code that resolves to a pending
+pairing is planned (`Pairing.generateShortCode()` exists in `:core`) but is NOT
+wired in Phase 1 — pair by QR scan or by pasting the full `PairingPayload` JSON.
+The pairing secret is long-lived and static in Phase 1 (no rotation / forward
+secrecy); see `SECURITY.md` for that limitation.
 
 ## Wire protocol: Envelope + framing
 
@@ -189,13 +193,17 @@ genuinely paired devices can exchange data.
   taps the relay sees only opaque ciphertext. Running sync through the cloud is
   therefore as safe as running it on your local network.
 - **Trust is established at pairing.** The 32-byte secret is exchanged by
-  physical proximity (QR scan) or via a short code that resolves to the pending
-  pairing. Compromising the relay does not grant the ability to read traffic or
-  to impersonate a device, because the relay enforces that a socket can only act
-  as the `deviceId`/`pairingId` it handshook with.
+  physical proximity (QR scan); the scanner then sends a sealed `PAIRING_HELLO`
+  so both devices record each other. Compromising the relay does not grant the
+  ability to read traffic or to impersonate a device, because the relay enforces
+  that a socket can only act as the `deviceId`/`pairingId` it handshook with.
 - **Secrets at rest.** On Android, pairing secrets live only in
   `EncryptedSharedPreferences` (Keystore-backed); per-link keys are derived on
   demand and never written to disk.
+- **Phase 1 limitation — no key rotation.** The pairing secret is long-lived and
+  static; there is no forward secrecy, so a leaked QR image remains a decryption
+  capability for that pairing. Rotation / ephemeral key exchange is a Phase 3
+  item (`docs/ROADMAP.md`); see `SECURITY.md`.
 
 Current limitations (tracked in [ROADMAP.md](ROADMAP.md)): the relay does not
 yet have its own authentication layer or TLS termination configured in this

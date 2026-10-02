@@ -50,10 +50,13 @@ install the matching Android SDK + build tools, and have 2+ Android devices
 2. **Point the app at your relay.** Set `RELAY_URL` in `app/build.gradle.kts`
    (`buildConfigField "RELAY_URL"`) to your `wss://<host>/ws`, then
    `./gradlew :app:assembleDebug` or Run from Android Studio onto each device.
-3. **Pair the devices.** On device A open **Devices → Show QR**. On device B
-   open **Devices → Scan QR** and scan it (or paste the payload into the
-   short-code field and tap **Pair**). Both devices now share the pairing
-   secret (stored encrypted) and derive the same link key via `:core`.
+3. **Pair the devices (bidirectional).** On device A open **Devices → Show QR**.
+   On device B open **Devices → Scan QR** and scan it (or paste the full payload
+   into the **Paste pairing payload** field and tap **Pair**). B records A, then
+   sends a sealed `PAIRING_HELLO` back so A records B too — confirm BOTH devices
+   now list the other under "Paired devices". This bidirectionality is required
+   for copy-on-A-see-on-B to work in both directions. (Phase 1 has no short-code
+   resolution; pair by QR scan or by pasting the payload.)
 4. **Universal Clipboard - same Wi-Fi (NEAR / LAN path).** Put both devices on
    the same Wi-Fi. Copy text on A, open Linkup on A, tap **Clipboard → Send
    current clipboard**. Confirm B shows it under "Last received" and that it is
@@ -65,8 +68,12 @@ install the matching Android SDK + build tools, and have 2+ Android devices
    minute first, then send: the relay's offline queue delivers it when A/B
    reconnect.
 6. **Screenshot.** On A tap the screenshot capture flow and grant the
-   MediaProjection consent dialog. Confirm the PNG arrives in B's **Inbox** and
-   is saved to Pictures/Linkup.
+   MediaProjection consent dialog. The capture runs through the foreground
+   `SyncService`, which declares `android:foregroundServiceType="dataSync|mediaProjection"`
+   and holds the `FOREGROUND_SERVICE_MEDIA_PROJECTION` permission (required on
+   API 29+, hard-enforced on API 34), so `getMediaProjection` does not throw a
+   `SecurityException`. Confirm the PNG arrives in B's **Inbox** and is saved to
+   Pictures/Linkup.
 7. **File / photo share.** On A use **Inbox → Send a file** (or share a file
    into Linkup from another app via the share sheet). Confirm it arrives in B's
    Inbox, that the sha256 integrity check passed (it would be discarded

@@ -7,13 +7,16 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Binder
 import android.os.Build
 import android.os.IBinder
 import com.linkup.app.BuildConfig
 import com.linkup.app.R
 import com.linkup.app.clipboard.ClipboardSync
+import com.linkup.app.pairing.PairingHandshake
 import com.linkup.app.pairing.PairingManager
 import com.linkup.app.share.FileShare
+import com.linkup.app.share.ScreenshotCapture
 import com.linkup.app.transport.LanTransport
 import com.linkup.app.transport.RelayClient
 import com.linkup.app.transport.TransportRouter
@@ -43,6 +46,15 @@ class SyncService : Service() {
     private lateinit var router: TransportRouter
     private lateinit var clipboardSync: ClipboardSync
     private lateinit var fileShare: FileShare
+    private lateinit var screenshotCapture: ScreenshotCapture
+    private lateinit var pairingHandshake: PairingHandshake
+
+    private val binder = LocalBinder()
+
+    /** Local binder so an in-process Activity can drive a screenshot capture. */
+    inner class LocalBinder : Binder() {
+        val service: SyncService get() = this@SyncService
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -53,17 +65,59 @@ class SyncService : Service() {
         val relay = RelayClient(
             relayUrl = BuildConfig.RELAY_URL,
             deviceId = pairing.deviceId,
-            // Phase 1: a device connects under its first pairing. Multi-pairing
-            // fan-out across sockets is a later-phase concern.
-            pairingId = pairing.pairedDevices().firstOrNull()?.pairingId ?: pairing.deviceId
+            // One relay socket per pairing so a device in multiple pairings
+            // receives far-path traffic for ALL of them. Fall back to the device
+            // id when not yet paired so the socket still comes up.
+            pairingIds = pairing.pairedDevices().map { it.pairingId }.distinct()
+                .ifEmpty { listOf(pairing.deviceId) }
         )
         val lan = LanTransport(applicationContext, pairing.deviceId, scope)
         router = TransportRouter(lan, relay, scope)
         clipboardSync = ClipboardSync(applicationContext, pairing, router)
         fileShare = FileShare(applicationContext, pairing, router)
+        screenshotCapture = ScreenshotCapture(applicationContext, fileShare)
+        pairingHandshake = PairingHandshake(pairing, router)
 
         router.start()
         dispatchIncoming()
+    }
+
+    /**
+     * Capture a screenshot using the MediaProjection consent result and send it
+     * to all paired devices. On API 29+ MediaProjection may only be acquired
+     * while a foreground service of type `mediaProjection` is running, so this
+     * elevates the running foreground notification to include that type for the
+     * duration of the capture, then restores the data-sync-only type. Returns
+     * the PNG byte size, or null on failure.
+     */
+    suspend fun captureScreenshot(resultCode: Int, data: Intent): Int? {
+        elevateToMediaProjection()
+        return try {
+            screenshotCapture.capture(resultCode, data)
+        } finally {
+            restoreDataSyncType()
+        }
+    }
+
+    private fun elevateToMediaProjection() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val notification = buildNotification(
+                getString(R.string.notif_running_title),
+                getString(R.string.notif_running_text)
+            )
+            startForeground(
+                NOTIF_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        }
+    }
+
+    private fun restoreDataSyncType() {
+        // Re-assert the baseline data-sync-only foreground type once capture is
+        // done so we don't hold the mediaProjection type longer than needed.
+        startForegroundNotification()
     }
 
     private fun dispatchIncoming() {
@@ -78,6 +132,11 @@ class SyncService : Service() {
                         val item = fileShare.onEnvelope(envelope)
                         if (item != null) notify(getString(R.string.notif_file_title), item.name)
                     }
+                    TransferKind.PAIRING_HELLO -> {
+                        // The initiator learns the scanner here and records it,
+                        // which is what makes the pairing bidirectional.
+                        pairingHandshake.onEnvelope(envelope)
+                    }
                 }
             }
         }
@@ -85,7 +144,7 @@ class SyncService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onDestroy() {
         router.stop()
