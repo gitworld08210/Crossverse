@@ -1,0 +1,16 @@
+{
+  "task_id": "task-android-ecosystem-phase1",
+  "task_description": "Build 'Linkup', a cross-device ecosystem app for all-Android devices (phone, tablet, Android laptop) giving Apple-like continuity: Universal Clipboard, instant screenshot sharing, and seamless file/photo sharing between paired devices. Must work BOTH on the same Wi-Fi (direct) AND when a device is remote/far away (via a zero-knowledge cloud relay). Phase 1 scaffolds a Gradle multi-module Kotlin project (:core pure-JVM protocol+E2E crypto+pairing, :relay Ktor WebSocket server, :app Android application) and implements the Phase 1 features. :core and :relay are unit-tested in the sandbox; :app requires the Android SDK (absent here) and is validated by review + documented on-device verification.",
+  "status": "completed",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005"],
+  "blocked_reason": null,
+  "verification": {
+    "build": "pass",
+    "tests": "pass",
+    "test_quality": "pass",
+    "docker_build": "skipped",
+    "summary": "JVM modules build and test green on JDK 17: `./gradlew :core:build :relay:build :core:test :relay:test` BUILD SUCCESSFUL. Final test count after two review-fix rounds: 34 :core tests + 4 :relay tests = 38, 0 failures. Test quality verified by reading E2ETest (real AES-256-GCM seal/open, wrong-key -> AEADBadTagException, HKDF determinism + context separation), RelayRoutingTest (real EnvelopeCodec, byte-identical delivery + decrypt with shared key, cross-pairing isolation, offline-queue flush), FileReassemblerTest (concurrent-transfer interleave regression that fails without the transferId fix), and PairingSubscriptionsTest (grow-at-runtime subscription that fails against a frozen snapshot) -- all exercise real logic and fail if reverted. Guarantees re-checked after fixes: relay still never decrypts (no openEnvelope/E2E.open/deriveLinkKey in relay/src/main), :core has no android imports, :app references :core. Android :app NOT assembled: no Android SDK in sandbox (docker_build skipped for the same reason + no Dockerfile); :app validated by structural review + documented on-device verification in docs/VERIFICATION.md.",
+    "semantic_review": "APPROVED on v3 (2026-10-02-074412-review.md). v1 raised 7 issues; the coder fixed 6 and justified deferring 1 (static long-lived QR secret -> Phase 3 hardening, documented in SECURITY.md). v2 raised 3 issues (primary: relay far-path startup-snapshot gap); all 3 fixed with new JVM tests. v3 confirmed all resolved with no regressions; only remaining item is one non-blocking cosmetic dangling KDoc reference ([shortCodeFor] in PairingManager.createPairing).",
+    "remaining_non_blocking": "Cosmetic: dangling [shortCodeFor] KDoc reference in PairingManager.createPairing (doc-only, no behavioral impact). On-device verification of :app still required by the user in Android Studio (no Android SDK in sandbox): per docs/VERIFICATION.md, build/install on 2+ Android devices, pair via QR, deploy :relay publicly and set RELAY_URL, then test clipboard/screenshot/file on same Wi-Fi AND on mobile data (phone far away)."
+  }
+}

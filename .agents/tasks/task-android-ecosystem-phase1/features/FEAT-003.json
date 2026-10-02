@@ -1,0 +1,27 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Implement the :relay Ktor WebSocket server that lets paired devices sync when they are NOT on the same network (phone far away, on mobile data). The relay is a zero-knowledge router: each device connects over a WebSocket authenticated by deviceId + pairingId, and the server forwards sealed Envelopes to the other device(s) in the same pairing without ever decrypting them (it has no link key). It also queues envelopes briefly for a device that is momentarily offline so a remote phone still receives them on reconnect. This module is pure Kotlin/JVM and is fully runnable and testable in the sandbox using ktor-server-test-host.",
+  "status": "completed",
+  "steps": [
+    "Create relay/src/main/kotlin/com/linkup/relay/Main.kt starting an embedded Netty server on a configurable port (env PORT, default 8080) and installing the WebSockets plugin; call a routing function module().",
+    "Create relay/src/main/kotlin/com/linkup/relay/RelayHub.kt: an in-memory registry keyed by pairingId -> set of connected device sessions (deviceId -> outbound channel). Thread-safe (Mutex or ConcurrentHashMap). Methods: register(pairingId, deviceId, session), unregister, and routeEnvelope(envelope) that sends to all sessions in the pairing except the sender; if the target has no live session, enqueue into a bounded per-device offline queue (with TTL / max size) to be flushed on next connect.",
+    "Create relay/src/main/kotlin/com/linkup/relay/Routing.kt: webSocket route `/ws` where the first message is a @Serializable Hello(deviceId, pairingId) frame; validate it, register the session, flush any queued envelopes, then loop reading incoming text frames, parse as core Envelope (reuse :core serialization), and call RelayHub.routeEnvelope. Clean up on close/exception. Reject frames whose fromDeviceId != the handshaked deviceId or whose pairingId mismatches.",
+    "Add a lightweight GET /health returning 200 for deploy checks.",
+    "Create relay/src/test/kotlin/com/linkup/relay/RelayRoutingTest.kt using ktor testApplication + a websocket client: connect two simulated devices (A and B) in the same pairing, have A send a sealed Envelope (built with :core EnvelopeCodec), and assert B receives the identical Envelope and can open it with the shared link key while a device in a DIFFERENT pairing receives nothing. Add a test that an envelope sent while B is offline is delivered after B connects (offline queue).",
+    "Add relay/README.md documenting how to run locally (`./gradlew :relay:run`), the env vars, and that it must be deployed to a public host (or port-forwarded) for true remote/off-LAN operation, and that it is end-to-end encrypted so the operator cannot read user data."
+  ],
+  "acceptance_criteria": [
+    "`./gradlew :relay:test` passes in the sandbox, proving two remote clients in the same pairing exchange a sealed Envelope through the relay and a third client in another pairing is isolated.",
+    "The offline-queue test proves a message sent while the peer is disconnected is delivered on reconnect (supports 'phone far away / asleep then wakes').",
+    "RelayHub never calls any decrypt/open API: confirm the relay has no access to link keys (grep shows no E2E.open usage in relay/src/main).",
+    "`./gradlew :relay:run` can start the server (health endpoint returns 200)."
+  ],
+  "verification": [
+    "Run `./gradlew :relay:test` and confirm BUILD SUCCESSFUL.",
+    "Start the server in the background with `./gradlew :relay:run` and `curl -s localhost:8080/health` returns 200, then stop it.",
+    "Run `grep -rn \"open(\" relay/src/main` to confirm the relay does not decrypt envelopes."
+  ],
+  "blocked_reason": null,
+  "findings": "Implemented the zero-knowledge Ktor WebSocket relay. Files: relay/src/main/kotlin/com/linkup/relay/{Main.kt,RelayHub.kt,Routing.kt}, relay/src/test/kotlin/com/linkup/relay/RelayRoutingTest.kt, relay/README.md. Reused :core Envelope/WireJson/EnvelopeCodec; relay never decrypts (grep -rn 'open(' relay/src/main returns NONE). RelayHub uses ConcurrentHashMap + Mutex with a bounded (100) TTL (5min) per-device offline queue flushed on reconnect. Routing: Hello(deviceId,pairingId) first frame, rejects frames whose fromDeviceId/pairingId mismatch the handshake. Ktor 2.3.12 APIs: server WebSockets DSL imports from io.ktor.server.websockets.*; 'call' from io.ktor.server.application.call (RoutingContext.call is 3.x and does not exist here). No catalog changes needed (ktor-server-test-host + ktor-client-* already present). Verification: './gradlew :core:test :relay:test' BUILD SUCCESSFUL (21 core + 4 relay tests: health 200, same-pairing routing+open with shared link key, cross-pairing isolation receives nothing, offline-queue delivered on reconnect). Live health check: ran the installDist launcher (PORT=8099) and 'curl localhost:8099/health' returned 200 'OK'. ENV NOTE: backgrounded processes via execute_bash do not persist across tool calls in this sandbox; the live health check must be run with the server started and curled within a single shell invocation (used setsid + kill). Test-host coverage is the deterministic gate."
+}
