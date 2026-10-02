@@ -1,0 +1,67 @@
+name: Build Android APK
+
+# Builds the Linkup Android app (:app module) into an installable APK.
+# Everything runs automatically on GitHub's hosted runners (which provide the
+# Android SDK the sandbox lacks), so no local Android SDK is needed. The debug
+# APK is unsigned-for-release but installable, and needs no secrets, so this
+# works out of the box after the repository is set up. The built APK is uploaded
+# as a workflow artifact, and on a version tag it is also attached to a Release.
+
+on:
+  push:
+    branches: [master, main]
+    tags: ['v*']
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: Assemble debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle (with cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # The committed gradle.properties pins org.gradle.java.home to a sandbox-only
+      # JDK 17 path that does not exist on the runner. Override it on the command
+      # line so Gradle uses the JDK 17 that setup-java installed (JAVA_HOME),
+      # without editing the committed file.
+      - name: Assemble debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon -Dorg.gradle.java.home="$JAVA_HOME"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linkup-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+
+      - name: Attach APK to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/debug/*.apk
