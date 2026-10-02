@@ -1,6 +1,7 @@
 package com.linkup.relay
 
-import com.linkup.core.Linkup
+import io.ktor.server.engine.embeddedServer
+import io.ktor.server.netty.Netty
 
 /**
  * Entry point for the Linkup relay server.
@@ -10,10 +11,15 @@ import com.linkup.core.Linkup
  * the other devices). It authenticates by pairing/device IDs but can never
  * decrypt payloads.
  *
- * The actual Ktor WebSocket routing is implemented in a later feature; for the
- * Phase 1 scaffold this just confirms the module configures, compiles, and can
- * reference :core.
+ * It listens on the port given by the `PORT` environment variable, defaulting
+ * to 8080, and serves the HTTP + WebSocket routes defined in [module].
  */
 fun main() {
-    println("Linkup relay ${Linkup.VERSION} (protocol v${Linkup.PROTOCOL_VERSION}) - routing not yet implemented")
+    val port = System.getenv("PORT")?.toIntOrNull() ?: DEFAULT_PORT
+    embeddedServer(Netty, port = port) {
+        module()
+    }.start(wait = true)
 }
+
+/** Default listen port when `PORT` is unset. */
+const val DEFAULT_PORT: Int = 8080
