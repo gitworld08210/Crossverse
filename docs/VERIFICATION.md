@@ -26,6 +26,14 @@ without the SDK installed, though it cannot be assembled):
 ./gradlew projects
 ```
 
+Optionally smoke-test the relay process itself: run it and hit its liveness
+probe.
+
+```bash
+./gradlew :relay:run        # starts on port 8080
+curl -s localhost:8080/health   # -> OK
+```
+
 > NOTE: `./gradlew :app:assembleDebug`, `:app:lint`, and instrumentation tests
 > REQUIRE the Android SDK and a device/emulator. They are NOT run in the
 > sandbox. Build and run `:app` in Android Studio instead (next section).
@@ -46,12 +54,12 @@ install the matching Android SDK + build tools, and have 2+ Android devices
    open **Devices → Scan QR** and scan it (or paste the payload into the
    short-code field and tap **Pair**). Both devices now share the pairing
    secret (stored encrypted) and derive the same link key via `:core`.
-4. **Universal Clipboard — same Wi-Fi (NEAR / LAN path).** Put both devices on
+4. **Universal Clipboard - same Wi-Fi (NEAR / LAN path).** Put both devices on
    the same Wi-Fi. Copy text on A, open Linkup on A, tap **Clipboard → Send
    current clipboard**. Confirm B shows it under "Last received" and that it is
    on B's system clipboard (paste into any app). This path uses NSD discovery +
    a direct socket, no cloud.
-5. **Universal Clipboard — mobile data (FAR / relay path).** Put device A on
+5. **Universal Clipboard - mobile data (FAR / relay path).** Put device A on
    mobile data (different network from B). Repeat step 4. It must still arrive on
    B, now routed through your deployed relay. Try it with A's screen off for a
    minute first, then send: the relay's offline queue delivers it when A/B
@@ -66,3 +74,16 @@ install the matching Android SDK + build tools, and have 2+ Android devices
 
 Every item above sends the SAME sealed `Envelope` whether it goes over the LAN
 or the relay; the relay only ever sees opaque ciphertext.
+
+## Known limitations
+
+- **No Android SDK in the sandbox.** The APK is not built or run in automated
+  CI; `:app` is validated by code review there and assembled by the user in
+  Android Studio.
+- **Android 10+ background clipboard reads.** Reading the clipboard from the
+  background is restricted on API 29+, so Universal Clipboard sending is driven
+  from the foreground app rather than silently in the background.
+- **Relay reachability.** Off-LAN / remote-phone sync only works while the
+  deployed `:relay` is reachable from both devices. A `localhost` relay only
+  serves devices on the same machine/network; deploy to a public host (or use a
+  tunnel) for the true far-away path.
