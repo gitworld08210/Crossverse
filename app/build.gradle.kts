@@ -22,6 +22,15 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Default relay host. The user replaces this with their deployed :relay
+        // (e.g. "wss://relay.example.com/ws") so off-LAN / remote-phone sync
+        // works. Overridable per build type below. See docs/VERIFICATION.md.
+        buildConfigField(
+            "String",
+            "RELAY_URL",
+            "\"wss://relay.linkup.example/ws\""
+        )
     }
 
     buildTypes {
@@ -45,6 +54,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -68,6 +78,13 @@ dependencies {
     // Relay WebSocket client (used when peers are on different networks).
     implementation(libs.ktor.client.okhttp)
     implementation(libs.ktor.client.websockets)
+
+    // Encrypted storage for pairing secrets / link key material.
+    implementation(libs.androidx.security.crypto)
+
+    // QR pairing: generate the QR bitmap (ZXing core) + scan via camera.
+    implementation(libs.zxing.core)
+    implementation(libs.zxing.android.embedded)
 
     testImplementation(libs.junit)
 }

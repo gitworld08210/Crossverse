@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Linkup</string>
+
+    <!-- Foreground service notification channel. -->
+    <string name="notif_channel_name">Linkup sync</string>
+    <string name="notif_channel_desc">Keeps your devices in sync over Wi-Fi or the relay.</string>
+
+    <!-- Persistent foreground notification. -->
+    <string name="notif_running_title">Linkup is syncing</string>
+    <string name="notif_running_text">Connected to your paired devices.</string>
+
+    <!-- Received-item notifications. -->
+    <string name="notif_clipboard_title">Clipboard received</string>
+    <string name="notif_file_title">File received</string>
+</resources>

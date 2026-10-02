@@ -17,6 +17,13 @@ lifecycle = "2.8.6"
 activityCompose = "1.9.2"
 composeBom = "2024.09.03"
 
+# AndroidX security (EncryptedSharedPreferences for pairing secrets)
+securityCrypto = "1.1.0-alpha06"
+
+# QR generation + camera scanning (pairing)
+zxingCore = "3.5.3"
+zxingEmbedded = "4.3.0"
+
 # Testing
 junit = "4.13.2"
 
@@ -48,6 +55,13 @@ androidx-compose-ui-graphics = { module = "androidx.compose.ui:ui-graphics" }
 androidx-compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
 androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
+
+# AndroidX security (encrypted storage of pairing secrets / link key material)
+androidx-security-crypto = { module = "androidx.security:security-crypto", version.ref = "securityCrypto" }
+
+# QR: ZXing core (generate the pairing QR bitmap) + embedded scanner (camera).
+zxing-core = { module = "com.google.zxing:core", version.ref = "zxingCore" }
+zxing-android-embedded = { module = "com.journeyapps:zxing-android-embedded", version.ref = "zxingEmbedded" }
 
 # Testing
 junit = { module = "junit:junit", version.ref = "junit" }
